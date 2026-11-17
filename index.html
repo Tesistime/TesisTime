@@ -1,4 +1,3 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Plazo de Trabajo Final</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -86,7 +85,7 @@ h1 { font-family: var(--f-display); font-weight: 600; font-size: clamp(1.75rem, 
 label { font-weight: 500; }
 .label-row label { display: block; margin: 0; }
 
-input[type="date"], input[type="number"] {
+input[type="date"], input[type="number"], input[type="text"] {
   font-family: var(--f-mono);
   font-size: 1.05rem;
   color: var(--fg);
@@ -99,7 +98,8 @@ input[type="date"], input[type="number"] {
   min-height: 44px;
 }
 input[type="number"] { max-width: 140px; }
-input[type="date"]:focus-visible, input[type="number"]:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type="text"] { max-width: 420px; font-family: var(--f-body, inherit); }
+input[type="date"]:focus-visible, input[type="number"]:focus-visible, input[type="text"]:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .hint { margin: 8px 0 0; font-size: 13px; color: var(--muted); }
 .hint:empty { display: none; }
 
@@ -192,6 +192,11 @@ input[type="date"]:focus-visible, input[type="number"]:focus-visible, summary:fo
       <h2 class="panel-title" id="form-title">Datos de tu etapa</h2>
       <p class="empty" id="noStage">Elegí una etapa y acá aparecen los datos que tenés que completar.</p>
       <div class="fields" id="fields" hidden>
+        <div class="field">
+          <div class="label-row"><label for="fullName">Nombre y apellido</label></div>
+          <input type="text" id="fullName" autocomplete="name" maxlength="80" placeholder="Nombre y apellido">
+          <p class="hint">Se registran tu nombre y los datos que ingreses, para uso interno de la Maestría.</p>
+        </div>
         <div class="field">
           <div class="label-row"><label for="cohort">Cohorte</label></div>
           <input type="number" id="cohort" inputmode="numeric" min="2017" max="2100" step="1" placeholder="2022">
@@ -379,7 +384,7 @@ input[type="date"]:focus-visible, input[type="number"]:focus-visible, summary:fo
   // </calc>
 
   var KEY = 'plazo-tf-etapas-v1';
-  var FIELDS = ['stage', 'cohort', 'coursesDate', 'planDate', 'planExt', 'tfExt'];
+  var FIELDS = ['stage', 'fullName', 'cohort', 'coursesDate', 'planDate', 'planExt', 'tfExt'];
   var $ = function (id) { return document.getElementById(id); };
 
   function todayLocal() {
@@ -387,20 +392,58 @@ input[type="date"]:focus-visible, input[type="number"]:focus-visible, summary:fo
     return { y: n.getFullYear(), m: n.getMonth() + 1, d: n.getDate() };
   }
 
-  var s = { stage: '', cohort: '', coursesDate: '', planDate: '', planExt: '', tfExt: '' };
+  var s = { stage: '', fullName: '', cohort: '', coursesDate: '', planDate: '', planExt: '', tfExt: '' };
   // Los datos ingresados no se guardan en ningún lado: al cerrar o recargar la página se borran.
   // También se limpia lo que hayan guardado versiones anteriores de la página.
   try { localStorage.removeItem(KEY); } catch (e) {}
   function save() {}
 
-  var inputs = { cohort: $('cohort'), coursesDate: $('coursesDate'), planDate: $('planDate'), planExt: $('planExt'), tfExt: $('tfExt') };
+  // ---- Registro de uso en Google Sheets ----
+  // Pegá acá la URL de la aplicación web de Apps Script (termina en /exec).
+  var LOG_URL = 'https://script.google.com/macros/s/AKfycbx4iGLAFZdU5oNqmc9CJzlUj41yflnI24AKAnesmIdBg-wlNxVSYPhc-p6gCoiML3UJ8w/exec';
+  var startedAt = null;
+  function touch() { if (!startedAt) startedAt = new Date(); }
+  function p2(n) { return (n < 10 ? '0' : '') + n; }
+  function stamp(d) {
+    return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds());
+  }
+  function isoOf(o) { return o ? o.y + '-' + p2(o.m) + '-' + p2(o.d) : ''; }
+  // Envía una fila por consulta, solo si llegaron a ver un resultado.
+  function sendLog() {
+    if (!startedAt) return;
+    var begun = startedAt;
+    startedAt = null;
+    var v = view(s, todayLocal());
+    var p = v.p;
+    if (!v.dl || !/^https:\/\//.test(LOG_URL)) return;
+    var data = {
+      inicio: stamp(begun),
+      fin: stamp(new Date()),
+      etapa: p.stage,
+      nombre: s.fullName.trim(),
+      cohorte: s.cohort.trim(),
+      fechaMaterias: (p.stage === '1' || p.regime === 'old') ? s.coursesDate : '',
+      fechaPlan: p.stage === '2' ? s.planDate : '',
+      prorrogaPlan: p.kind === 'plan' && p.expired ? s.planExt : '',
+      prorrogaTF: p.kind === 'tf' && p.expired ? s.tfExt : '',
+      estado: v.dl.ev.label,
+      fechaLimite: isoOf(v.dl.date)
+    };
+    try {
+      fetch(LOG_URL, { method: 'POST', mode: 'no-cors', keepalive: true, headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(data) }).catch(function () {});
+    } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') sendLog(); });
+  window.addEventListener('pagehide', sendLog);
+
+  var inputs = { fullName: $('fullName'), cohort: $('cohort'), coursesDate: $('coursesDate'), planDate: $('planDate'), planExt: $('planExt'), tfExt: $('tfExt') };
   Object.keys(inputs).forEach(function (k) {
     inputs[k].value = s[k];
-    inputs[k].addEventListener('input', function () { s[k] = inputs[k].value; save(); render(); });
+    inputs[k].addEventListener('input', function () { touch(); s[k] = inputs[k].value; save(); render(); });
   });
   Array.prototype.forEach.call(document.querySelectorAll('input[name="stage"]'), function (el) {
     el.checked = s.stage === el.value;
-    el.addEventListener('change', function () { s.stage = el.value; save(); render(); });
+    el.addEventListener('change', function () { touch(); s.stage = el.value; save(); render(); });
   });
 
   var FUTURE = 'Esa fecha es posterior a hoy. Revisá que esté bien cargada.';
@@ -478,6 +521,7 @@ input[type="date"]:focus-visible, input[type="number"]:focus-visible, summary:fo
     $('dot2').textContent = '';
   }
   function resetAll() {
+    startedAt = null;
     FIELDS.forEach(function (k) { s[k] = ''; });
     Object.keys(inputs).forEach(function (k) { inputs[k].value = ''; });
     Array.prototype.forEach.call(document.querySelectorAll('input[name="stage"]'), function (el) { el.checked = false; });
@@ -487,6 +531,7 @@ input[type="date"]:focus-visible, input[type="number"]:focus-visible, summary:fo
   // Si el navegador restaura la página (botón Atrás o pestaña recuperada), vuelve a empezar vacía.
   window.addEventListener('pageshow', resetAll);
   $('resetBtn').addEventListener('click', function () {
+    sendLog();
     resetAll();
     var top = document.querySelector('.stages');
     if (top && top.scrollIntoView) top.scrollIntoView({ block: 'start' });
@@ -494,5 +539,3 @@ input[type="date"]:focus-visible, input[type="number"]:focus-visible, summary:fo
   });
 })();
 </script>
-
-</body></html>
